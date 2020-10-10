@@ -106,7 +106,9 @@ var canvas = document.querySelector('canvas');
 var c = canvas.getContext('2d');
 
 var stepsize = 20;
-var movesize = stepsize;
+var movesize = stepsize + 5;
+
+var socket = void 0;
 
 var canvasTouchBorder = '#CA2C68';
 var canvasNormalBorder = '#707070';
@@ -116,7 +118,7 @@ canvas.width = innerWidth - 10
 canvas.height = innerHeight - 10
 */
 
-canvas.width = 1000;
+canvas.width = 700;
 canvas.height = 800;
 
 var mouse = {
@@ -124,44 +126,62 @@ var mouse = {
     y: innerHeight / 2
 };
 
-var colors = ['#16a085', '#27ae60', '#2980b9', '#8e44ad', '#2c3e50', '#f39c12', '#d35400', '#bdc3c7', '#7f8c8d'];
+var colors = ['#FFC312', '#F79F1F', '#12CBC4', '#FDA7DF', '#B53471', '#EE5A24', '#009432', '#0652DD', '#5758BB', '#6F1E51'];
 
-var colornames = ['darkgreen', 'lightgreen', 'blue', 'purple', 'black', 'yellow', 'orange', 'red', 'lightgrey', 'grey'];
-
-// Event Listeners
-addEventListener('mousemove', function (event) {
-    mouse.x = event.clientX;
-    mouse.y = event.clientY;
-});
+var colornames = ['yellow', 'orange', 'turquise', 'pink', 'magenta', 'orange', 'green', 'blue', 'purple', 'mpurple'];
 
 addEventListener('resize', function () {
-    canvas.width = innerWidth;
-    canvas.height = innerHeight;
-
     init();
 });
 
+var keysPressed = {};
 addEventListener('keydown', function (e) {
-
     // First the main directions, then diagonal
-
     var x = object.x;
     var y = object.y;
 
-    if (e.key == 'w' || e.key == 'ArrowUp') {
-        y -= movesize;
-    } else if (e.key == 'a' || e.key == 'ArrowLeft') {
-        x -= movesize;
-    } else if (e.key == 's' || e.key == 'ArrowDown') {
-        y += movesize;
-    } else if (e.key == 'd' || e.key == 'ArrowRight') {
-        x += movesize;
-    } else {
-        console.log(e);
+    keysPressed[e.key] = true;
+
+    if (['w', 'a', 's', 'd', 'W', 'A', 'S', 'D', 'ArrowUp', 'ArrowLeft', 'ArrowDown', 'ArrowRight'].includes(e.key)) {
+
+        if (keysPressed['w'] && keysPressed['d'] || keysPressed['W'] && keysPressed['D'] || keysPressed['ArrowUp'] && keysPressed['ArrowRight']) {
+            x += movesize;
+            y -= movesize;
+            object.direction = "wd";
+        } else if (keysPressed['s'] && keysPressed['d'] || keysPressed['S'] && keysPressed['D'] || keysPressed['ArrowDown'] && keysPressed['ArrowRight']) {
+            x += movesize;
+            y += movesize;
+            object.direction = "sd";
+        } else if (keysPressed['a'] && keysPressed['s'] || keysPressed['A'] && keysPressed['S'] || keysPressed['ArrowLeft'] && keysPressed['ArrowDown']) {
+            x -= movesize;
+            y += movesize;
+            object.direction = "as";
+        } else if (keysPressed['w'] && keysPressed['a'] || keysPressed['W'] && keysPressed['A'] || keysPressed['ArrowUp'] && keysPressed['ArrowLeft']) {
+            x -= movesize;
+            y -= movesize;
+            object.direction = "wa";
+        } else if (e.key == 'w' || e.key == 'W' || e.key == 'ArrowUp') {
+            y -= movesize;
+            object.direction = "w";
+        } else if (e.key == 'a' || e.key == 'A' || e.key == 'ArrowLeft') {
+            x -= movesize;
+            object.direction = "a";
+        } else if (e.key == 's' || e.key == 'S' || e.key == 'ArrowDown') {
+            y += movesize;
+            object.direction = "s";
+        } else if (e.key == 'd' || e.key == 'D' || e.key == 'ArrowRight') {
+            x += movesize;
+            object.direction = "d";
+        } else {}
+
+        setPosition(object, x, y);
+        logPosition(object);
+        sendPosition(object);
     }
-    setPosition(object, x, y);
-    logPosition(object);
-    sendPosition(object);
+});
+
+addEventListener('keyup', function (event) {
+    delete keysPressed[event.key];
 });
 
 function setPosition(object, x, y) {
@@ -192,8 +212,16 @@ function setPosition(object, x, y) {
     object.y = y;
 }
 
+function objectToJSON(object) {
+    var jobj = { uuid: object.uuid, x: object.x, y: object.y, color: object.color, direction: object.direction };
+    return JSON.stringify(jobj);
+}
+
 function sendPosition(object) {
     console.log("send position to server over ws");
+    if (socket.readyState === socket.OPEN) {
+        socket.send(objectToJSON(object));
+    }
 }
 
 function logPosition(object) {
@@ -219,20 +247,13 @@ function getLengthForText(text) {
     var para = document.createElement('div');
     para.textContent = "Hello";
     para.style.fontSize = fontSize;
-
-    //para.style.display = 'inline'
     para.style.position = 'absolute';
     para.style.visibility = 'hidden';
     para.style.height = 'auto';
     para.style.width = 'auto';
     para.style.whiteSpace = 'nowrap';
-
     body.appendChild(para);
-
     var cwidth = para.clientWidth + 1;
-
-    console.log("WIDTH: " + cwidth);
-    console.log("2WIDTH: " + Math.floor(cwidth / 2));
     para.parentNode.removeChild(para);
     return cwidth;
 }
@@ -245,6 +266,37 @@ function uuidv4() {
     });
 }
 
+function registerSocketEventlistener() {
+
+    socket.addEventListener('message', function (event) {
+        console.log("got message ", event.data);
+        checkMessage(event.data);
+    });
+
+    socket.addEventListener('error', function (event) {
+        console.error("something bad happend on the socker ", event);
+    });
+}
+
+function checkMessage(raw_data) {
+
+    var data = JSON.parse(raw_data);
+
+    for (var i in bubbles) {
+        if (bubbles[i].uuid == data.uuid) {
+            console.log("SAME");
+            bubbles[i].x = data.x;
+            bubbles[i].y = data.y;
+        } else {
+            console.log(data.message);
+            var color = data.color;
+            var name = getNameforColor(color, colors, colornames);
+            var obj = new Object(data.x, data.y, stepsize, color, name, getLengthForText(name), data.uuid);
+            bubbles.push(obj);
+        }
+    }
+}
+
 // Objects
 function Object(x, y, radius, color, colorname, namelength, uuid) {
     this.x = x;
@@ -255,6 +307,7 @@ function Object(x, y, radius, color, colorname, namelength, uuid) {
     this.name = colorname;
     this.namelength = namelength;
     this.uuid = uuid;
+    this.direction = null;
 }
 
 Object.prototype.draw = function () {
@@ -280,6 +333,16 @@ function init() {
 
     bubbles = [];
 
+    //socket = new WebSocket("ws://127.0.0.1:8080/ws");
+    socket = new WebSocket("ws://213.167.224.113:9999/ws");
+    console.log("Attempting Connection...");
+
+    socket.onopen = function () {
+        console.log("Successfully Connected");
+        registerSocketEventlistener();
+        sendPosition(object);
+    };
+
     // player bubble
     var color = (0, _utils.randomColor)(colors);
     var name = getNameforColor(color, colors, colornames);
@@ -293,7 +356,6 @@ function init() {
 function animate() {
     requestAnimationFrame(animate);
     c.clearRect(0, 0, canvas.width, canvas.height);
-    //object.update()
 
     bubbles.forEach(function (bubble) {
         bubble.update();
